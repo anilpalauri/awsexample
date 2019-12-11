@@ -1,0 +1,118 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Integrating Lambda with Parameter Store
+Parameters:
+  IAMUsername:
+    Description: Name of the IAM user who will be the administrator of the KMS key
+      we create. This user will be able to encrypt values and manage the key.
+    Type: String
+Resources:
+  ParameterStoreEncryptionKey:
+    Properties:
+      Description: Encryption key for secret config values for the Parameter Store
+        Blog post
+      EnableKeyRotation: false
+      Enabled: true
+      KeyPolicy:
+        Id: key-default-1
+        Statement:
+        - Action:
+          - kms:Create*
+          - kms:Encrypt
+          - kms:Describe*
+          - kms:Enable*
+          - kms:List*
+          - kms:Put*
+          - kms:Update*
+          - kms:Revoke*
+          - kms:Disable*
+          - kms:Get*
+          - kms:Delete*
+          - kms:ScheduleKeyDeletion
+          - kms:CancelKeyDeletion
+          Effect: Allow
+          Principal:
+            AWS:
+            - Fn::Sub: arn:aws:iam::${AWS::AccountId}:user/${IAMUsername}
+          Resource: '*'
+          Sid: Allow administration of the key & encryption of new values
+        - Action:
+          - kms:Encrypt
+          - kms:Decrypt
+          - kms:ReEncrypt*
+          - kms:GenerateDataKey*
+          - kms:DescribeKey
+          Effect: Allow
+          Principal:
+            AWS:
+              Fn::GetAtt:
+              - ExerciseLambdaRole
+              - Arn
+          Resource: '*'
+          Sid: Allow use of the key
+        Version: '2012-10-17'
+    Type: AWS::KMS::Key
+  ParameterStoreEncryptionKeyAlias:
+    Properties:
+      AliasName: alias/ParameterKeyLambda
+      TargetKeyId:
+        Ref: ParameterStoreEncryptionKey
+    Type: AWS::KMS::Alias
+  exercise-lambda:
+    Properties:
+      CodeUri: s3://parameter-example/lambda-parameter-store-example.zip
+      Description: Integrating lambda with Parameter Store
+      Environment:
+        Variables:
+          APP_CONFIG_PATH: parameterStoreBlog
+          AWS_XRAY_TRACING_NAME: exercise-lambda
+          ENV: dev
+      FunctionName: exercise-lambda
+      Handler: lambda_function.lambda_handler
+      Role:
+        Fn::GetAtt:
+        - ExerciseLambdaRole
+        - Arn
+      Runtime: python3.6
+      Timeout: 5
+      Tracing: Active
+    Type: AWS::Serverless::Function
+  ExerciseLambdaRole:
+    Properties:
+      AssumeRolePolicyDocument:
+        Statement:
+        - Action:
+          - sts:AssumeRole
+          Effect: Allow
+          Principal:
+            Service:
+            - lambda.amazonaws.com
+        Version: '2012-10-17'
+      Policies:
+      - PolicyDocument:
+          Statement:
+          - Action:
+            - ssm:GetParameter*
+            Effect: Allow
+            Resource:
+              Fn::Sub: arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter*
+          Version: '2012-10-17'
+        PolicyName: ParameterSSMAccess
+      - PolicyDocument:
+          Statement:
+          - Action:
+            - logs:CreateLogGroup
+            - logs:CreateLogStream
+            - logs:PutLogEvents
+            Effect: Allow
+            Resource: '*'
+          Version: '2012-10-17'
+        PolicyName: ParameterSSMLambdaBasicExecution
+    Type: AWS::IAM::Role
+  SimpleParameter:
+    Properties:
+      Description: Sample dev config values for my app
+      Name: UserName
+      Type: String
+      Value: '{"key1": "value1"}'
+    Type: AWS::SSM::Parameter
+Transform: AWS::Serverless-2016-10-31
